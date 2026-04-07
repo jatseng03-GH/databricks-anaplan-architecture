@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { GitBranch, ChevronDown, ChevronRight, CheckCircle, Circle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { GitBranch, ChevronDown, ChevronRight, CheckCircle, Circle, Layers, Sparkles } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import { INTEGRATION_PATTERNS, DELTA_TABLES, ORCHESTRATION_JOBS, MONTHLY_JOBS, PIPELINE_HEALTH } from '../data/integrations';
+import L5Section from '../components/L5Diagram';
 
 // ─── Swim-lane Data Flow Diagram ─────────────────────────────────────────────
 function SwimLaneDiagram() {
@@ -36,9 +37,9 @@ function SwimLaneDiagram() {
     [0, 2, 1, 0, 'nightly ETL',   '#4A5568', true,  false],
     [0, 3, 1, 0, 'nightly API',   '#4A5568', true,  false],
     [1, 0, 1, 1, 'write finance schema', '#00C6BE', false, false],
-    [1, 1, 2, 0, 'import action (API)', '#00C6BE', false, true ],
+    [1, 1, 2, 0, 'CloudWorks import',   '#00C6BE', false, true ],
     [1, 1, 1, 3, 'Delta table read',    '#00C6BE', true,  false],
-    [1, 2, 2, 0, 'access policy sync',  '#8A9DB5', true,  true ],
+    [1, 2, 1, 1, 'table governance',    '#8A9DB5', true,  false],
     [1, 3, 2, 3, 'BI query layer',      '#D4A843', false, false],
   ];
 
@@ -576,24 +577,10 @@ function OrchestrationTimeline() {
   );
 }
 
-// ─── Main Integration Page ─────────────────────────────────────────────────
-export default function Integration() {
+// ─── L4 Content (existing integration architecture) ─────────────────────────
+function L4Content() {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      style={{ maxWidth: 1280, margin: '0 auto', padding: '100px 24px 80px' }}
-    >
-      <PageHeader
-        breadcrumb="Integration Architecture"
-        title="Anaplan × Databricks"
-        titleAccent="Integration"
-        subtitle="Bidirectional data architecture connecting the Anaplan planning layer to the Databricks Data Intelligence Platform. Actuals flow in nightly; locked plans flow out monthly for variance analytics."
-        badge="Platform Integration"
-        icon={GitBranch}
-      />
-
+    <>
       {/* Key metrics */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 40 }}>
         {[
@@ -652,6 +639,130 @@ export default function Integration() {
           <OrchestrationTimeline />
         </div>
       </motion.div>
+    </>
+  );
+}
+
+// ─── Architecture Level Tabs ────────────────────────────────────────────────
+const ARCH_TABS = [
+  {
+    id: 'l4',
+    label: 'L4 Integrated',
+    sublabel: 'Current State',
+    color: '#00C6BE',
+    icon: Layers,
+    description: 'Bidirectional Delta Lake ↔ Anaplan with CloudWorks, Unity Catalog governance, and full observability',
+  },
+  {
+    id: 'l5',
+    label: 'L5 Autonomous',
+    sublabel: 'Target State',
+    color: '#D4A843',
+    icon: Sparkles,
+    description: 'ML-augmented forecasting, AI agents, self-healing pipelines, and predictive planning',
+  },
+];
+
+// ─── Main Integration Page ─────────────────────────────────────────────────
+export default function Integration() {
+  const [activeTab, setActiveTab] = useState('l4');
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      style={{ maxWidth: 1280, margin: '0 auto', padding: '100px 24px 80px' }}
+    >
+      <PageHeader
+        breadcrumb="Integration Architecture"
+        title="Anaplan × Databricks"
+        titleAccent="Architecture"
+        subtitle={activeTab === 'l4'
+          ? 'Bidirectional data architecture connecting the Anaplan planning layer to the Databricks Data Intelligence Platform. Actuals flow in nightly; locked plans flow out monthly for variance analytics.'
+          : 'Autonomous FP&A architecture powered by the full Databricks AI stack and Anaplan native AI. ML-augmented forecasting, intelligent agents, and self-driving planning workflows.'
+        }
+        badge={activeTab === 'l4' ? 'Platform Integration' : 'Autonomous Planning'}
+        icon={activeTab === 'l4' ? GitBranch : Sparkles}
+      />
+
+      {/* L4 / L5 Tab Switcher */}
+      <div style={{
+        display: 'flex', gap: 8, marginBottom: 36,
+        padding: 4, background: 'var(--db-navy-2)', borderRadius: 10,
+        border: '1px solid var(--db-border)',
+      }}>
+        {ARCH_TABS.map((tab) => {
+          const isActive = activeTab === tab.id;
+          const TabIcon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                flex: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                padding: '14px 20px', borderRadius: 8,
+                border: isActive ? `1px solid ${tab.color}40` : '1px solid transparent',
+                background: isActive ? `${tab.color}12` : 'transparent',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <TabIcon size={16} color={isActive ? tab.color : 'var(--db-muted)'} />
+              <div style={{ textAlign: 'left' }}>
+                <div style={{
+                  fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 13,
+                  color: isActive ? tab.color : 'var(--db-muted)',
+                  letterSpacing: '0.04em',
+                }}>
+                  {tab.label}
+                </div>
+                <div style={{
+                  fontFamily: 'DM Sans, sans-serif', fontSize: 11,
+                  color: isActive ? 'var(--db-muted)' : 'var(--db-muted)',
+                  marginTop: 1, opacity: isActive ? 1 : 0.6,
+                }}>
+                  {tab.sublabel}
+                </div>
+              </div>
+              {isActive && (
+                <div style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: tab.color,
+                  boxShadow: `0 0 8px ${tab.color}60`,
+                  marginLeft: 4,
+                }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab content */}
+      <AnimatePresence mode="wait">
+        {activeTab === 'l4' ? (
+          <motion.div
+            key="l4"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.25 }}
+          >
+            <L4Content />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="l5"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.25 }}
+          >
+            <L5Section />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

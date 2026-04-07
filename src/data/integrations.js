@@ -7,13 +7,13 @@ export const INTEGRATION_PATTERNS = [
     direction: 'INTO Anaplan',
     directionColor: '#00C6BE',
     frequency: 'Nightly (1 AM PST)',
-    orchestrator: 'Databricks Workflows job',
+    orchestrator: 'Databricks Workflows → CloudWorks',
     steps: [
-      { n: 1, text: 'Workflow triggers after Delta Lake finance schema write completes (post-transform validation gate)' },
-      { n: 2, text: 'Anaplan REST API called: POST /imports/{modelId}/{importId}/tasks — bearer token auth via Vault secret' },
-      { n: 3, text: 'Data mapping: Delta table columns → Anaplan module line items (column mapping table below)' },
-      { n: 4, text: 'Anaplan import executes; calculation engine fires automatically on completion' },
-      { n: 5, text: 'Success webhook → Slack alert to #fp-and-a-systems channel: "Actuals loaded ✓"' },
+      { n: 1, text: 'Databricks Workflow completes Delta Lake finance schema write (post-transform validation gate)' },
+      { n: 2, text: 'Final workflow task exports validated data as pipe-delimited CSV to ADLS Gen2 landing zone (finance/actuals/outbound/)' },
+      { n: 3, text: 'Anaplan CloudWorks connection detects new files in landing zone → triggers Saved Import actions on the target model' },
+      { n: 4, text: 'CloudWorks handles column mapping, data type conversion, and error retry natively. Anaplan calculation engine fires on completion.' },
+      { n: 5, text: 'CloudWorks posts completion status → Databricks Workflow picks up status via landing zone flag file → Slack webhook task fires' },
     ],
     tables: [
       { delta: 'finance.actuals.gl_actuals', anaplan: 'GL Actuals module', hub: 'Data Hub' },
@@ -27,17 +27,18 @@ export const INTEGRATION_PATTERNS = [
       { delta: 'actual_amount (DECIMAL)', anaplan: 'Actuals line item (USD)', notes: 'FX conversion applied in Hub' },
       { delta: 'legal_entity (STRING)', anaplan: 'Entity list item', notes: 'Must match Hub entity list' },
     ],
-    errorHandling: 'Retry 3× with exponential backoff (2m, 4m, 8m). On terminal failure → PagerDuty alert + Anaplan actuals lock frozen until manual review.',
-    apiSample: `POST https://api.anaplan.com/2/0/workspaces/{wId}/models/{mId}/imports/{iId}/tasks
-Authorization: Bearer {token}
-Content-Type: application/json
+    errorHandling: 'CloudWorks handles retry natively (configurable up to 3× with backoff). On terminal failure → CloudWorks error notification + PagerDuty alert + Anaplan actuals lock frozen until manual review.',
+    apiSample: `# Databricks side: export validated data to landing zone
+df.coalesce(1).write.mode("overwrite") \\
+  .option("header", "true") \\
+  .option("delimiter", "|") \\
+  .csv("abfss://finance@datalake.dfs.core.windows.net/actuals/outbound/gl_actuals/")
 
-{
-  "localeName": "en_US"
-}
-
-// Poll task status:
-GET https://api.anaplan.com/2/0/workspaces/{wId}/models/{mId}/imports/{iId}/tasks/{taskId}`,
+# Anaplan CloudWorks: configured via Anaplan UI
+# Connection: ADLS Gen2 → finance/actuals/outbound/
+# Schedule: Event-driven (file arrival) or cron (01:00 PST)
+# Action: Saved Import → GL Actuals module
+# Post-import: Trigger calculation engine automatically`,
   },
   {
     id: 'plan-out',
@@ -48,9 +49,9 @@ GET https://api.anaplan.com/2/0/workspaces/{wId}/models/{mId}/imports/{iId}/task
     trigger: 'Manual action after forecast lock OR automated on 3rd of month at 11:59 PM PST',
     latency: '~15 minutes end-to-end after lock',
     steps: [
-      { n: 1, text: 'Anaplan export action runs → generates flat file (UTF-8 CSV, pipe-delimited) via Saved Export definition' },
-      { n: 2, text: 'Anaplan CloudWorks (or custom API polling) pushes flat file to Databricks external location (ADLS Gen2 / S3 landing zone)' },
-      { n: 3, text: 'Databricks Autoloader picks up file → MERGE INTO finance.plan.anaplan_opex_export (upsert on period + cost_center + version)' },
+      { n: 1, text: 'Anaplan CloudWorks triggers Saved Export action → generates pipe-delimited CSV from locked plan data' },
+      { n: 2, text: 'CloudWorks pushes flat file to ADLS Gen2 landing zone (finance/plan/inbound/)' },
+      { n: 3, text: 'Databricks Autoloader detects file arrival → MERGE INTO finance.plan.anaplan_opex_export (upsert on period + cost_center + version)' },
       { n: 4, text: 'dbt model rebuilds finance.analytics.variance_bridge table joining actuals + plan' },
       { n: 5, text: 'Databricks SQL dashboard auto-refreshes; Looker PDT rebuild triggered via API' },
     ],
@@ -59,14 +60,19 @@ GET https://api.anaplan.com/2/0/workspaces/{wId}/models/{mId}/imports/{iId}/task
       { anaplan: 'HC Expense Summary module', delta: 'finance.plan.anaplan_hc_export', notes: 'Aggregate only, no PII' },
       { anaplan: 'Revenue Summary module', delta: 'finance.plan.anaplan_revenue_export', notes: 'ARR, GAAP Rev' },
     ],
-    apiSample: `# Step 1 — trigger Anaplan export action
-POST https://api.anaplan.com/2/0/workspaces/{wId}/models/{mId}/exports/{eId}/tasks
-Authorization: Bearer {token}
+    apiSample: `# Anaplan CloudWorks: configured via Anaplan UI
+# Connection: ADLS Gen2 → finance/plan/inbound/
+# Trigger: Post-lock (manual) or cron (3rd of month, 23:59 PST)
+# Action: Saved Export → Opex Summary, HC Expense Summary, Revenue Summary
 
-# Step 2 — download result file
-GET https://api.anaplan.com/2/0/workspaces/{wId}/models/{mId}/exports/{eId}/tasks/{taskId}/chunks/0
+# Databricks side: Autoloader picks up exported files
+spark.readStream.format("cloudFiles") \\
+  .option("cloudFiles.format", "csv") \\
+  .option("header", "true") \\
+  .option("delimiter", "|") \\
+  .load("abfss://finance@datalake.dfs.core.windows.net/plan/inbound/")
 
-# Step 3 — Databricks: merge into Delta table
+# Merge into Delta table
 MERGE INTO finance.plan.anaplan_opex_export AS target
 USING landing.anaplan_export_staging AS source
 ON target.period = source.period
@@ -119,9 +125,9 @@ LEFT JOIN finance.plan.anaplan_opex_export p
     id: 'governance',
     label: 'Governance & Access',
     sublabel: 'Unity Catalog ↔ Anaplan',
-    direction: 'Bidirectional (policy-driven)',
+    direction: 'Parallel governance (quarterly alignment)',
     directionColor: '#8A9DB5',
-    purpose: 'Keep Anaplan RBAC and Unity Catalog access policies in sync — same person who can see headcount data in Anaplan can query it in Databricks SQL, and vice versa',
+    purpose: 'Anaplan and Unity Catalog govern access independently — Anaplan via native model roles, selective access, and ALM; Unity Catalog via table grants, column masking, and row-level filters. A quarterly IT governance review ensures the two frameworks stay aligned.',
     anaplanSide: [
       'Model roles map 1:1 to Databricks account-level groups (e.g., Anaplan role "HC_Restricted" → group "fp_hc_restricted")',
       'Selective access on Hub lists mirrors row-level filters (e.g., VP Sales sees only Sales cost centers)',
@@ -300,7 +306,7 @@ export const ORCHESTRATION_JOBS = [
   { name: 'Anaplan calculation engine runs', start: 1.5, duration: 0.5, system: 'anaplan', color: '#EE3D2C' },
   { name: 'variance_bridge view rebuild', start: 2.0, duration: 0.25, system: 'databricks', color: '#00C6BE' },
   { name: 'Looker / Databricks SQL refresh', start: 6.0, duration: 0.33, system: 'databricks', color: '#00C6BE' },
-  { name: 'FP&A Slack alert: "Actuals loaded ✓"', start: 7.0, duration: 0.08, system: 'validation', color: '#D4A843' },
+  { name: 'Slack webhook task: "Actuals loaded ✓"', start: 7.0, duration: 0.08, system: 'validation', color: '#D4A843' },
 ];
 
 export const MONTHLY_JOBS = [

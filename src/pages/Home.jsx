@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { TrendingUp, Users, Server, Percent, BadgeDollarSign, Receipt, Database, ArrowRight, CheckCircle, Circle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { TrendingUp, Users, Server, Percent, BadgeDollarSign, Receipt, Database, ArrowRight, CheckCircle, Circle, Layers, Sparkles } from 'lucide-react';
 import { SPOKE_MODELS } from '../data/models';
+import L5LandscapeDiagram from '../components/L5Landscape';
 
 const ICON_MAP = { TrendingUp, Users, Server, Percent, BadgeDollarSign, Receipt };
 
@@ -13,8 +14,8 @@ const HUB_TOOLTIP = {
   type: 'Hub Model',
   typeColor: '#EE3D2C',
   description:
-    'The central model that owns all shared master data — org hierarchy, cost centers, employee lists, and planning drivers. Every spoke model pulls its foundation from here, ensuring one consistent source of truth across all planning processes.',
-  details: ['8 Modules', '9 Lists', 'Master Data · Shared Drivers'],
+    'The central model that owns all shared master data — org hierarchy, cost centers, employee lists, and planning drivers. Every spoke model pulls its foundation from here. Governed by Anaplan\'s native RBAC (model roles, selective access on lists), ALM for Dev/Test/Prod promotion, and its own audit log — independent of Unity Catalog.',
+  details: ['8 Modules', '9 Lists', 'RBAC · ALM · Audit'],
   keyOutput: 'Single source of truth for all planning assumptions',
 };
 
@@ -42,9 +43,9 @@ const DB_PLATFORM_TOOLTIPS = {
     type: 'Databricks Platform',
     typeColor: '#00C6BE',
     description:
-      'Centralized data governance that controls who sees what. Salary and compensation fields are masked by role, all data access is logged for audit, and table-level permissions align to Anaplan role-based access — meeting SOX and privacy requirements without extra tooling.',
-    details: ['Role-based access', 'PII field masking', 'Full audit log'],
-    keyOutput: 'Compliant, auditable access control across the finance data estate',
+      'Governs the Databricks side only — controls who can query which Delta Lake tables, masks PII columns (e.g. salary data), applies row-level filters by cost center, and tags data classifications. Not connected to Anaplan; access policies are aligned through a quarterly IT governance review.',
+    details: ['Table-level grants', 'PII column masking', 'Row-level filters', 'Audit log'],
+    keyOutput: 'Compliant, auditable access control for the Databricks finance data estate',
   },
   workflows: {
     name: 'Databricks Workflows — Pipeline Orchestration',
@@ -120,9 +121,18 @@ const OUTPUT_TOOLTIPS = {
     type: 'Output',
     typeColor: '#D4A843',
     description:
-      'Automated notifications sent to the FP&A Slack channel when the nightly pipeline completes, fails, or detects data anomalies (e.g., headcount count shifts > 5%, ARR variance > threshold). Keeps the team informed without anyone having to check logs.',
-    details: ['Pipeline status alerts', 'Anomaly detection', 'FP&A channel'],
-    keyOutput: 'Proactive data quality monitoring for the finance team',
+      'Notifications sent to the #fp-and-a-systems Slack channel via a webhook task at the end of each Databricks Workflow run. A Python notebook calls the Slack Incoming Webhooks API with pipeline status, anomaly flags, and load confirmation. Not a native Databricks integration — it\'s a custom script bridge.',
+    details: ['Webhook via Python task', 'Incoming Webhooks API', '#fp-and-a-systems'],
+    keyOutput: 'Proactive pipeline status alerts for the finance team',
+  },
+  nux: {
+    name: 'Anaplan NUX Dashboards',
+    type: 'Anaplan Output',
+    typeColor: '#EE3D2C',
+    description:
+      'Native Anaplan planning dashboards built in New UX. Used by FP&A business partners for scenario modeling, driver-based forecasting, and plan submission. Controlled by Anaplan\'s own role-based access and page visibility settings.',
+    details: ['Planning views', 'Scenario modeling', 'Role-based visibility'],
+    keyOutput: 'Interactive planning interface for finance business partners',
   },
 };
 
@@ -132,33 +142,28 @@ function LandscapeDiagram() {
   const [hovered, setHovered] = useState(null);
   const [tooltip, setTooltip] = useState(null);
 
-  const cx = 400, cy = 310;
-  const r_spoke = 155;
-  const r_db = 245;
+  const cx = 400, cy = 290;
+  const r_spoke = 145;
 
   const spokePositions = SPOKE_MODELS.map(m => {
     const rad = (m.angle - 90) * Math.PI / 180;
     return { ...m, x: cx + r_spoke * Math.cos(rad), y: cy + r_spoke * Math.sin(rad) };
   });
 
-  const dbPlatformNodes = [
-    { id: 'delta-lake', label: 'Delta Lake',       sub: 'Finance Schema',         angle: 315, color: '#00C6BE', linkLabel: 'actuals in / plan out' },
-    { id: 'dbsql-node', label: 'Databricks SQL',   sub: 'Variance Analytics',     angle:  45, color: '#00C6BE', linkLabel: 'variance analytics' },
-    { id: 'unity',      label: 'Unity Catalog',    sub: 'Access Governance',      angle: 135, color: '#00C6BE', linkLabel: 'access governance' },
-    { id: 'workflows',  label: 'DB Workflows',     sub: 'Pipeline Orchestration', angle: 225, color: '#00C6BE', linkLabel: 'pipeline orchestration' },
-  ].map(n => {
-    const rad = (n.angle - 90) * Math.PI / 180;
-    return { ...n, x: cx + r_db * Math.cos(rad), y: cy + r_db * Math.sin(rad) };
-  });
+  // DB platform: positioned explicitly for clean pipeline flow
+  const dbNodes = [
+    { id: 'workflows',  label: 'DB Workflows',   sub: 'Orchestration', x: 148, y: 290 },
+    { id: 'delta-lake', label: 'Delta Lake',      sub: 'Finance Schema', x: 148, y: 178 },
+    { id: 'unity',      label: 'Unity Catalog',   sub: 'Governance',    x: 148, y: 118 },
+    { id: 'dbsql-node', label: 'Databricks SQL',  sub: 'Analytics',     x: 610, y: 178 },
+  ];
 
-  const externals = [
-    { id: 'workday',    label: 'Workday',     sub: 'HRIS',           x: 58,  y: 150, targetDbId: 'workflows' },
-    { id: 'netsuite',   label: 'NetSuite',    sub: 'ERP',            x: 58,  y: 230, targetDbId: 'workflows' },
-    { id: 'salesforce', label: 'Salesforce',  sub: 'CRM',            x: 58,  y: 310, targetDbId: 'workflows' },
-    { id: 'aws-cost',   label: 'AWS / GCP',   sub: 'Cloud Cost',     x: 58,  y: 390, targetDbId: 'workflows' },
-    { id: 'looker',     label: 'Looker',      sub: 'BI Dashboards',  x: 714, y: 200, targetDbId: 'dbsql-node', output: true },
-    { id: 'cfodash',    label: 'CFO Board',   sub: 'Dashboard',      x: 714, y: 310, targetDbId: 'dbsql-node', output: true },
-    { id: 'slack',      label: 'Slack Alert', sub: 'FP&A Team',      x: 714, y: 410, targetDbId: 'workflows',  output: true },
+  // Source systems as a grouped container
+  const sources = [
+    { id: 'workday', label: 'Workday HRIS' },
+    { id: 'netsuite', label: 'NetSuite ERP' },
+    { id: 'salesforce', label: 'Salesforce CRM' },
+    { id: 'aws-cost', label: 'AWS / GCP Cost' },
   ];
 
   function shortenLine(x1, y1, x2, y2, margin1 = 40, margin2 = 40) {
@@ -172,139 +177,219 @@ function LandscapeDiagram() {
   const showTooltip = (data) => { setTooltip(data); };
   const hideTooltip = () => { setTooltip(null); setHovered(null); };
 
+  // Find node helpers
+  const wf = dbNodes.find(d => d.id === 'workflows');
+  const dl = dbNodes.find(d => d.id === 'delta-lake');
+  const uc = dbNodes.find(d => d.id === 'unity');
+  const sql = dbNodes.find(d => d.id === 'dbsql-node');
+
   return (
     <div style={{ position: 'relative', width: '100%', overflowX: 'auto' }}>
       <style>{`
-        @keyframes dashForward  { to { stroke-dashoffset: -24; } }
-        @keyframes dashBackward { to { stroke-dashoffset:  24; } }
-        .bidir-fwd  { animation: dashForward  1.2s linear infinite; }
-        .bidir-bwd  { animation: dashBackward 1.2s linear infinite; }
-        @keyframes dashIn { to { stroke-dashoffset: -20; } }
-        .src-line   { animation: dashIn 2s linear infinite; }
+        @keyframes flowPulse { to { stroke-dashoffset: -20; } }
+        .flow-anim { animation: flowPulse 1.8s linear infinite; }
+        @keyframes flowReverse { to { stroke-dashoffset: 20; } }
+        .flow-rev { animation: flowReverse 1.8s linear infinite; }
         .diagram-node { cursor: pointer; }
-        .diagram-node:hover rect { filter: brightness(1.3); }
+        .diagram-node:hover rect, .diagram-node:hover polygon { filter: brightness(1.25); }
       `}</style>
 
-      <svg width="800" height="640" viewBox="0 0 800 640" style={{ display: 'block', margin: '0 auto', maxWidth: '100%' }}>
+      <svg width="800" height="600" viewBox="0 0 800 600" style={{ display: 'block', margin: '0 auto', maxWidth: '100%' }}>
         <defs>
           <radialGradient id="hubGrad2" cx="50%" cy="50%" r="50%">
-            <stop offset="0%"   stopColor="#EE3D2C" stopOpacity="0.25" />
+            <stop offset="0%" stopColor="#EE3D2C" stopOpacity="0.2" />
             <stop offset="100%" stopColor="#EE3D2C" stopOpacity="0" />
           </radialGradient>
-          <radialGradient id="dbRingGrad" cx="50%" cy="50%" r="50%">
-            <stop offset="60%"  stopColor="#00C6BE" stopOpacity="0" />
-            <stop offset="100%" stopColor="#00C6BE" stopOpacity="0.06" />
-          </radialGradient>
-          <marker id="arrowTeal2"  markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L6,3 z" fill="#00C6BE" opacity="0.85" />
-          </marker>
-          <marker id="arrowGold2"  markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L6,3 z" fill="#D4A843" opacity="0.7" />
-          </marker>
-          <marker id="arrowGrey"   markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
-            <path d="M0,0 L0,5 L5,2.5 z" fill="#4A5568" opacity="0.8" />
+          <marker id="arrowTeal2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#00C6BE" opacity="0.8" />
           </marker>
           <marker id="arrowTealRev" markerWidth="6" markerHeight="6" refX="1" refY="3" orient="auto">
-            <path d="M6,0 L6,6 L0,3 z" fill="#00C6BE" opacity="0.85" />
+            <path d="M6,0 L6,6 L0,3 z" fill="#00C6BE" opacity="0.8" />
+          </marker>
+          <marker id="arrowGrey" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+            <path d="M0,0 L0,5 L5,2.5 z" fill="#4A5568" opacity="0.7" />
+          </marker>
+          <marker id="arrowGold2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#D4A843" opacity="0.7" />
+          </marker>
+          <marker id="arrowRed" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#EE3D2C" opacity="0.7" />
+          </marker>
+          <marker id="arrowMuted" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+            <path d="M0,0 L0,5 L5,2.5 z" fill="#8A9DB5" opacity="0.5" />
           </marker>
         </defs>
 
-        {/* Background rings */}
-        <circle cx={cx} cy={cy} r={r_db + 30} fill="url(#dbRingGrad)" />
-        <circle cx={cx} cy={cy} r={108} fill="url(#hubGrad2)" />
-        <circle cx={cx} cy={cy} r={r_db} fill="none" stroke="#00C6BE" strokeWidth={0.5} strokeDasharray="4 6" opacity={0.2} />
+        {/* ─── Hub glow ─── */}
+        <circle cx={cx} cy={cy} r={100} fill="url(#hubGrad2)" />
 
-        {/* Spoke connection lines */}
+        {/* ─── Spoke connection lines (subtle, lowest visual layer) ─── */}
         {spokePositions.map(s => {
           const isHov = hovered === s.id;
           return (
             <line key={`spoke-line-${s.id}`}
               x1={cx} y1={cy} x2={s.x} y2={s.y}
-              stroke={isHov ? '#EE3D2C' : '#2A3A54'}
-              strokeWidth={isHov ? 1.8 : 1}
-              strokeDasharray="5 4"
-              opacity={isHov ? 1 : 0.7}
-              className={isHov ? 'bidir-fwd' : ''}
+              stroke={isHov ? '#EE3D2C' : '#1E2E48'}
+              strokeWidth={isHov ? 1.5 : 0.8}
+              strokeDasharray="4 5"
+              opacity={isHov ? 0.9 : 0.4}
             />
           );
         })}
 
-        {/* Hub ↔ Databricks: bidirectional teal animated lines */}
-        {dbPlatformNodes.map(db => {
-          const line = shortenLine(cx, cy, db.x, db.y, 68, 42);
-          const mx = (cx + db.x) / 2, my = (cy + db.y) / 2;
-          const dx = db.x - cx, dy = db.y - cy;
-          const len = Math.sqrt(dx * dx + dy * dy);
-          const px = -dy / len * 10, py = dx / len * 10;
+        {/* ─── DATA PIPELINE: Source → Workflows → Delta Lake ↔ Hub ─── */}
+
+        {/* Source container → DB Workflows (single arrow) */}
+        <line x1={70} y1={290} x2={wf.x - 46} y2={wf.y}
+          stroke="#4A5568" strokeWidth={1.2} strokeDasharray="4 4" opacity={0.5}
+          markerEnd="url(#arrowGrey)" className="flow-anim" />
+
+        {/* DB Workflows → Delta Lake */}
+        <line x1={wf.x} y1={wf.y - 22} x2={dl.x} y2={dl.y + 20}
+          stroke="#00C6BE" strokeWidth={1.5} strokeDasharray="6 6" opacity={0.55}
+          markerEnd="url(#arrowTeal2)" className="flow-anim" />
+
+        {/* Unity Catalog → Delta Lake (governance, subtle) */}
+        <line x1={uc.x + 20} y1={uc.y + 16} x2={dl.x + 20} y2={dl.y - 16}
+          stroke="#8A9DB5" strokeWidth={0.8} strokeDasharray="3 4" opacity={0.35}
+          markerEnd="url(#arrowMuted)" />
+
+        {/* Delta Lake → CloudWorks (landing zone handoff) */}
+        {(() => {
+          const cwx = 262, cwy = 222;
+          const l1 = shortenLine(dl.x + 42, dl.y + 8, cwx - 28, cwy, 0, 0);
+          const l2 = shortenLine(cwx + 28, cwy, cx - 56, cy - 28, 0, 0);
           return (
-            <g key={`db-line-${db.id}`}>
-              <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}
-                stroke="#00C6BE" strokeWidth={1.8} strokeDasharray="8 8" opacity={0.6}
-                className="bidir-fwd" markerEnd="url(#arrowTeal2)" />
-              <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}
-                stroke="#00C6BE" strokeWidth={1.8} strokeDasharray="8 8" strokeDashoffset={12} opacity={0.35}
-                className="bidir-bwd" markerStart="url(#arrowTealRev)" />
-              <text x={mx + px} y={my + py} textAnchor="middle" dominantBaseline="middle"
-                style={{ fontFamily: 'DM Mono, monospace', fontSize: 7.5, fill: '#00C6BE', opacity: 0.75 }}>
-                {db.linkLabel}
-              </text>
+            <g>
+              {/* DL → CloudWorks */}
+              <line x1={l1.x1} y1={l1.y1} x2={l1.x2} y2={l1.y2}
+                stroke="#00C6BE" strokeWidth={1.5} strokeDasharray="6 5" opacity={0.5}
+                className="flow-anim" markerEnd="url(#arrowTeal2)" />
+              {/* CloudWorks → Hub (forward) */}
+              <line x1={l2.x1} y1={l2.y1} x2={l2.x2} y2={l2.y2}
+                stroke="#00C6BE" strokeWidth={1.5} strokeDasharray="6 5" opacity={0.5}
+                className="flow-anim" markerEnd="url(#arrowTeal2)" />
+              {/* Hub → CloudWorks (reverse, for plan export) */}
+              <line x1={l2.x1} y1={l2.y1} x2={l2.x2} y2={l2.y2}
+                stroke="#00C6BE" strokeWidth={1.5} strokeDasharray="6 5" strokeDashoffset={10} opacity={0.2}
+                className="flow-rev" markerStart="url(#arrowTealRev)" />
+              {/* CloudWorks → DL (reverse, for plan export) */}
+              <line x1={l1.x1} y1={l1.y1} x2={l1.x2} y2={l1.y2}
+                stroke="#00C6BE" strokeWidth={1.5} strokeDasharray="6 5" strokeDashoffset={10} opacity={0.2}
+                className="flow-rev" markerStart="url(#arrowTealRev)" />
+              {/* CloudWorks node */}
+              <g className="diagram-node"
+                onMouseEnter={() => { setHovered('cloudworks'); showTooltip({
+                  name: 'Anaplan CloudWorks',
+                  type: 'Integration Layer',
+                  typeColor: '#00C6BE',
+                  description: 'Anaplan\'s native integration platform. Reads actuals from the ADLS/S3 landing zone and triggers Anaplan imports automatically. For plan exports, pushes flat files back to the landing zone for Autoloader pickup. Handles retry logic, scheduling, and monitoring natively — no custom API code required.',
+                  details: ['ADLS / S3 connector', 'Scheduled + event-driven', 'Native retry & monitoring'],
+                  keyOutput: 'Zero-code bidirectional data bridge between Delta Lake and Anaplan',
+                }); }}
+                onMouseLeave={hideTooltip}
+              >
+                <rect x={cwx - 28} y={cwy - 14} width={56} height={28} rx={14}
+                  fill={hovered === 'cloudworks' ? '#0F2A2A' : '#071A1A'}
+                  stroke={hovered === 'cloudworks' ? '#00C6BE' : '#0E3A3A'}
+                  strokeWidth={hovered === 'cloudworks' ? 1.5 : 0.8} />
+                <text x={cwx} y={cwy + 1} textAnchor="middle" dominantBaseline="middle"
+                  style={{ fontFamily: 'DM Mono, monospace', fontSize: 6.5, fill: '#00C6BE', letterSpacing: '0.03em' }}>
+                  CloudWorks
+                </text>
+              </g>
             </g>
           );
-        })}
+        })()}
 
-        {/* External source → DB Workflows lines */}
-        {externals.filter(e => !e.output).map(e => {
-          const targetDb = dbPlatformNodes.find(d => d.id === e.targetDbId);
-          if (!targetDb) return null;
-          const line = shortenLine(e.x + 44, e.y, targetDb.x, targetDb.y, 0, 40);
-          return (
-            <line key={`src-${e.id}`}
-              x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}
-              stroke="#4A5568" strokeWidth={1} strokeDasharray="3 4" opacity={0.55}
-              className="src-line" markerEnd="url(#arrowGrey)" />
-          );
-        })}
+        {/* Delta Lake → Databricks SQL */}
+        <line x1={dl.x + 46} y1={dl.y} x2={sql.x - 46} y2={sql.y}
+          stroke="#00C6BE" strokeWidth={1.2} strokeDasharray="5 5" opacity={0.4}
+          markerEnd="url(#arrowTeal2)" className="flow-anim" />
 
-        {/* DB SQL → output systems lines */}
-        {externals.filter(e => e.output).map(e => {
-          const targetDb = dbPlatformNodes.find(d => d.id === e.targetDbId);
-          if (!targetDb) return null;
-          const line = shortenLine(targetDb.x, targetDb.y, e.x, e.y, 40, 0);
-          return (
-            <line key={`out-${e.id}`}
-              x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}
-              stroke="#D4A843" strokeWidth={1} strokeDasharray="3 4" opacity={0.45}
-              markerEnd="url(#arrowGold2)" />
-          );
-        })}
+        {/* ─── OUTPUTS ─── */}
 
-        {/* Databricks platform nodes — with tooltip */}
-        {dbPlatformNodes.map(db => {
+        {/* Databricks SQL → Analytics Outputs */}
+        <line x1={sql.x + 46} y1={sql.y} x2={710} y2={178}
+          stroke="#D4A843" strokeWidth={1} strokeDasharray="4 4" opacity={0.4}
+          markerEnd="url(#arrowGold2)" />
+
+        {/* Hub → NUX Dashboards */}
+        <line x1={cx + 55} y1={cy + 20} x2={710} y2={340}
+          stroke="#EE3D2C" strokeWidth={1} strokeDasharray="4 4" opacity={0.35}
+          markerEnd="url(#arrowRed)" />
+
+        {/* Workflows → Slack (webhook, very subtle) */}
+        <line x1={wf.x} y1={wf.y + 22} x2={wf.x} y2={wf.y + 48}
+          stroke="#4A5568" strokeWidth={0.8} strokeDasharray="2 3" opacity={0.3}
+          markerEnd="url(#arrowGrey)" />
+
+        {/* ─── NODES: Source Systems (grouped container) ─── */}
+        <g className="diagram-node">
+          <rect x={12} y={208} width={58} height={164} rx={6}
+            fill="#0A1220" stroke="#1E2E48" strokeWidth={0.8} />
+          <text x={41} y={226} textAnchor="middle"
+            style={{ fontFamily: 'DM Mono, monospace', fontSize: 7, fill: '#4A5568', letterSpacing: '0.08em' }}>
+            SOURCES
+          </text>
+          {sources.map((s, i) => (
+            <g key={s.id}
+              onMouseEnter={() => { setHovered(s.id); showTooltip(SOURCE_TOOLTIPS[s.id]); }}
+              onMouseLeave={hideTooltip}
+            >
+              <rect x={18} y={236 + i * 32} width={46} height={24} rx={4}
+                fill={hovered === s.id ? '#0E1830' : '#070E1A'}
+                stroke={hovered === s.id ? '#3A5A80' : '#162030'}
+                strokeWidth={0.6} />
+              <text x={41} y={251 + i * 32} textAnchor="middle"
+                style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 7, fill: hovered === s.id ? '#C0D0E0' : '#6B7D95' }}>
+                {s.label.split(' ')[0]}
+              </text>
+            </g>
+          ))}
+        </g>
+
+        {/* ─── NODES: Databricks Platform ─── */}
+        {dbNodes.map(db => {
           const isHov = hovered === db.id;
           return (
             <g key={db.id} className="diagram-node"
               onMouseEnter={() => { setHovered(db.id); showTooltip(DB_PLATFORM_TOOLTIPS[db.id]); }}
               onMouseLeave={hideTooltip}
-              transform={`translate(${db.x - 46},${db.y - 24})`}
+              transform={`translate(${db.x - 42},${db.y - 18})`}
             >
-              <rect width={92} height={48} rx={7}
+              <rect width={84} height={36} rx={6}
                 fill={isHov ? '#0F2A2A' : '#071A1A'}
                 stroke={isHov ? '#00C6BE' : '#0E3A3A'}
-                strokeWidth={isHov ? 1.5 : 1}
+                strokeWidth={isHov ? 1.5 : 0.8}
               />
-              <text x={46} y={17} textAnchor="middle"
-                style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 9, fill: '#00C6BE' }}>
+              <text x={42} y={14} textAnchor="middle"
+                style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 8.5, fill: '#00C6BE' }}>
                 {db.label}
               </text>
-              <text x={46} y={30} textAnchor="middle"
-                style={{ fontFamily: 'DM Mono, monospace', fontSize: 7.5, fill: '#4A7A78' }}>
+              <text x={42} y={26} textAnchor="middle"
+                style={{ fontFamily: 'DM Mono, monospace', fontSize: 7, fill: '#4A7A78' }}>
                 {db.sub}
               </text>
             </g>
           );
         })}
 
-        {/* Spoke nodes — clickable + tooltip */}
+        {/* Slack webhook label under Workflows */}
+        <g className="diagram-node"
+          onMouseEnter={() => { setHovered('slack'); showTooltip(OUTPUT_TOOLTIPS['slack']); }}
+          onMouseLeave={hideTooltip}
+        >
+          <rect x={wf.x - 30} y={wf.y + 50} width={60} height={20} rx={4}
+            fill={hovered === 'slack' ? '#0E1830' : '#070E1A'}
+            stroke={hovered === 'slack' ? '#3A5A80' : '#162030'} strokeWidth={0.6} />
+          <text x={wf.x} y={wf.y + 63} textAnchor="middle"
+            style={{ fontFamily: 'DM Mono, monospace', fontSize: 6.5, fill: '#4A5568' }}>
+            Slack webhook
+          </text>
+        </g>
+
+        {/* ─── NODES: Spoke models (inner ring) ─── */}
         {spokePositions.map(s => {
           const isHov = hovered === s.id;
           return (
@@ -312,122 +397,145 @@ function LandscapeDiagram() {
               onMouseEnter={() => { setHovered(s.id); showTooltip({ ...s, type: 'Spoke Model', typeColor: '#EE3D2C', details: [`${s.modules} Modules`, `${s.lists} Lists`] }); }}
               onMouseLeave={hideTooltip}
               onClick={() => navigate(s.path)}
-              transform={`translate(${s.x - 52},${s.y - 26})`}
+              transform={`translate(${s.x - 48},${s.y - 22})`}
             >
-              <rect width={104} height={52} rx={7}
+              <rect width={96} height={44} rx={6}
                 fill={isHov ? '#1A0F0F' : '#0F1828'}
                 stroke={isHov ? '#EE3D2C' : '#1E2E48'}
-                strokeWidth={isHov ? 1.5 : 1}
+                strokeWidth={isHov ? 1.2 : 0.8}
               />
-              <text x={52} y={18} textAnchor="middle"
-                style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 9, fill: isHov ? '#F5F1EB' : '#8A9DB5' }}>
+              <text x={48} y={15} textAnchor="middle"
+                style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 8.5, fill: isHov ? '#F5F1EB' : '#8A9DB5' }}>
                 {s.name.split(' ').slice(0, 2).join(' ')}
               </text>
-              <text x={52} y={29} textAnchor="middle"
-                style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 9, fill: isHov ? '#F5F1EB' : '#8A9DB5' }}>
+              <text x={48} y={26} textAnchor="middle"
+                style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 8.5, fill: isHov ? '#F5F1EB' : '#8A9DB5' }}>
                 {s.name.split(' ').slice(2).join(' ')}
               </text>
-              <text x={52} y={43} textAnchor="middle"
-                style={{ fontFamily: 'DM Mono, monospace', fontSize: 7.5, fill: '#6B7D95' }}>
+              <text x={48} y={38} textAnchor="middle"
+                style={{ fontFamily: 'DM Mono, monospace', fontSize: 7, fill: '#6B7D95' }}>
                 {s.modules}M · {s.lists}L
               </text>
             </g>
           );
         })}
 
-        {/* Hub hexagon — with tooltip */}
+        {/* ─── Hub hexagon ─── */}
         {[0, 1].map(i => (
           <polygon key={`hex-${i}`}
             points={[0,1,2,3,4,5].map(j => {
               const a = (j * 60 - 30) * Math.PI / 180;
-              const radius = i === 0 ? 68 : 58;
+              const radius = i === 0 ? 62 : 52;
               return `${cx + radius * Math.cos(a)},${cy + radius * Math.sin(a)}`;
             }).join(' ')}
-            fill={i === 0 ? 'rgba(238,61,44,0.14)' : '#0F1828'}
-            stroke={i === 0 ? 'rgba(238,61,44,0.55)' : 'rgba(238,61,44,0.25)'}
-            strokeWidth={i === 0 ? 1.5 : 1}
+            fill={i === 0 ? 'rgba(238,61,44,0.12)' : '#0F1828'}
+            stroke={i === 0 ? 'rgba(238,61,44,0.45)' : 'rgba(238,61,44,0.2)'}
+            strokeWidth={i === 0 ? 1.2 : 0.8}
           />
         ))}
-        {/* Hub text + invisible hit area */}
         <g className="diagram-node"
           onMouseEnter={() => { setHovered('hub'); showTooltip(HUB_TOOLTIP); }}
           onMouseLeave={hideTooltip}
           style={{ cursor: 'pointer' }}
         >
-          <circle cx={cx} cy={cy} r={60} fill="transparent" />
-          <text x={cx} y={cy - 14} textAnchor="middle"
+          <circle cx={cx} cy={cy} r={54} fill="transparent" />
+          <text x={cx} y={cy - 12} textAnchor="middle"
             style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 10, fill: '#F5F1EB' }}>Anaplan</text>
-          <text x={cx} y={cy} textAnchor="middle"
+          <text x={cx} y={cy + 2} textAnchor="middle"
             style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 10, fill: '#F5F1EB' }}>Data Hub</text>
-          <text x={cx} y={cy + 14} textAnchor="middle"
-            style={{ fontFamily: 'DM Mono, monospace', fontSize: 7.5, fill: '#6B7D95' }}>Master Data · Drivers</text>
+          <text x={cx} y={cy + 16} textAnchor="middle"
+            style={{ fontFamily: 'DM Mono, monospace', fontSize: 7, fill: '#6B7D95' }}>Master Data · Drivers</text>
+          <rect x={cx - 32} y={cy + 22} width={64} height={13} rx={3}
+            fill="rgba(238,61,44,0.1)" stroke="rgba(238,61,44,0.25)" strokeWidth={0.5} />
+          <text x={cx} y={cy + 30} textAnchor="middle" dominantBaseline="middle"
+            style={{ fontFamily: 'DM Mono, monospace', fontSize: 5.5, fill: '#EE3D2C', opacity: 0.6, letterSpacing: '0.04em' }}>
+            RBAC · ALM · Audit
+          </text>
         </g>
 
-        {/* Source system nodes — with tooltip */}
-        {externals.filter(e => !e.output).map(e => (
-          <g key={e.id} className="diagram-node"
-            onMouseEnter={() => { setHovered(e.id); showTooltip(SOURCE_TOOLTIPS[e.id]); }}
+        {/* ─── NODES: Output containers ─── */}
+
+        {/* Analytics outputs (from DB SQL) */}
+        <g>
+          <rect x={710} y={140} width={78} height={78} rx={6}
+            fill="#0A1220" stroke="#2A3010" strokeWidth={0.8} />
+          <text x={749} y={157} textAnchor="middle"
+            style={{ fontFamily: 'DM Mono, monospace', fontSize: 6.5, fill: '#D4A843', letterSpacing: '0.06em' }}>
+            ANALYTICS
+          </text>
+          {[{ id: 'looker', label: 'Looker' }, { id: 'cfodash', label: 'CFO Board' }].map((o, i) => (
+            <g key={o.id}
+              onMouseEnter={() => { setHovered(o.id); showTooltip(OUTPUT_TOOLTIPS[o.id]); }}
+              onMouseLeave={hideTooltip}
+            >
+              <rect x={716} y={164 + i * 26} width={66} height={20} rx={4}
+                fill={hovered === o.id ? '#15120A' : '#070E1A'}
+                stroke={hovered === o.id ? '#5A4A10' : '#1A2010'}
+                strokeWidth={0.6} />
+              <text x={749} y={177 + i * 26} textAnchor="middle"
+                style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 8, fill: hovered === o.id ? '#E8C870' : '#D4A843' }}>
+                {o.label}
+              </text>
+            </g>
+          ))}
+        </g>
+
+        {/* Anaplan outputs (from Hub) */}
+        <g>
+          <rect x={710} y={310} width={78} height={56} rx={6}
+            fill="#0A1220" stroke="#2A1A1A" strokeWidth={0.8} />
+          <text x={749} y={327} textAnchor="middle"
+            style={{ fontFamily: 'DM Mono, monospace', fontSize: 6.5, fill: '#EE3D2C', letterSpacing: '0.06em' }}>
+            PLANNING
+          </text>
+          <g
+            onMouseEnter={() => { setHovered('nux'); showTooltip(OUTPUT_TOOLTIPS['nux']); }}
             onMouseLeave={hideTooltip}
           >
-            <rect x={e.x} y={e.y - 18} width={80} height={38} rx={5}
-              fill={hovered === e.id ? '#0E1830' : '#0A1220'}
-              stroke={hovered === e.id ? '#3A5A80' : '#1E2E48'}
-              strokeWidth={0.8}
-            />
-            <text x={e.x + 40} y={e.y - 3} textAnchor="middle"
-              style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 500, fontSize: 9, fill: hovered === e.id ? '#C0D0E0' : '#8A9DB5' }}>
-              {e.label}
+            <rect x={716} y={334} width={66} height={24} rx={4}
+              fill={hovered === 'nux' ? '#1A0F0F' : '#070E1A'}
+              stroke={hovered === 'nux' ? '#EE3D2C' : '#1A1010'}
+              strokeWidth={0.6} />
+            <text x={749} y={344} textAnchor="middle"
+              style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 7.5, fill: hovered === 'nux' ? '#F5F1EB' : '#EE3D2C' }}>
+              NUX Dashboards
             </text>
-            <text x={e.x + 40} y={e.y + 11} textAnchor="middle"
-              style={{ fontFamily: 'DM Mono, monospace', fontSize: 7.5, fill: '#4A5568' }}>
-              {e.sub}
-            </text>
-          </g>
-        ))}
-
-        {/* Output nodes — with tooltip */}
-        {externals.filter(e => e.output).map(e => (
-          <g key={e.id} className="diagram-node"
-            onMouseEnter={() => { setHovered(e.id); showTooltip(OUTPUT_TOOLTIPS[e.id]); }}
-            onMouseLeave={hideTooltip}
-          >
-            <rect x={e.x} y={e.y - 18} width={80} height={38} rx={5}
-              fill={hovered === e.id ? '#15120A' : '#0A1220'}
-              stroke={hovered === e.id ? '#5A4A10' : '#2A3010'}
-              strokeWidth={0.8}
-            />
-            <text x={e.x + 40} y={e.y - 3} textAnchor="middle"
-              style={{ fontFamily: 'DM Sans, sans-serif', fontWeight: 500, fontSize: 9, fill: hovered === e.id ? '#E8C870' : '#D4A843' }}>
-              {e.label}
-            </text>
-            <text x={e.x + 40} y={e.y + 11} textAnchor="middle"
-              style={{ fontFamily: 'DM Mono, monospace', fontSize: 7.5, fill: '#6B5A20' }}>
-              {e.sub}
+            <text x={749} y={354} textAnchor="middle"
+              style={{ fontFamily: 'DM Mono, monospace', fontSize: 6, fill: '#6B3A30' }}>
+              Planning Views
             </text>
           </g>
-        ))}
+        </g>
 
-        {/* Column labels */}
-        <text x={98}  y={72} textAnchor="middle" style={{ fontFamily: 'DM Mono, monospace', fontSize: 8, fill: '#4A5568', letterSpacing: '0.12em' }}>SOURCE SYSTEMS</text>
-        <text x={cx}  y={72} textAnchor="middle" style={{ fontFamily: 'DM Mono, monospace', fontSize: 8, fill: '#4A5568', letterSpacing: '0.12em' }}>ANAPLAN LAYER</text>
-        <text x={754} y={72} textAnchor="middle" style={{ fontFamily: 'DM Mono, monospace', fontSize: 8, fill: '#4A5568', letterSpacing: '0.12em' }}>OUTPUTS</text>
+        {/* ─── Column labels ─── */}
+        <text x={41} y={196} textAnchor="middle"
+          style={{ fontFamily: 'DM Mono, monospace', fontSize: 7, fill: '#4A5568', letterSpacing: '0.08em' }}>
+        </text>
+        <text x={cx} y={56} textAnchor="middle"
+          style={{ fontFamily: 'DM Mono, monospace', fontSize: 8, fill: '#3A4A60', letterSpacing: '0.12em' }}>
+          ANAPLAN HUB-AND-SPOKE
+        </text>
 
-        {/* Legend */}
-        <g transform="translate(210, 592)">
-          <rect width={380} height={34} rx={6} fill="#0A1220" stroke="#1E2E48" strokeWidth={0.8} />
-          <line x1={12} y1={17} x2={38} y2={17} stroke="#EE3D2C" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.8} />
-          <text x={44} y={21} style={{ fontFamily: 'DM Mono, monospace', fontSize: 8, fill: '#6B7D95' }}>Anaplan internal</text>
-          <line x1={138} y1={17} x2={164} y2={17} stroke="#00C6BE" strokeWidth={1.8} strokeDasharray="5 4" opacity={0.8} />
-          <text x={170} y={21} style={{ fontFamily: 'DM Mono, monospace', fontSize: 8, fill: '#6B7D95' }}>Databricks integration</text>
-          <line x1={295} y1={17} x2={318} y2={17} stroke="#4A5568" strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />
-          <text x={323} y={21} style={{ fontFamily: 'DM Mono, monospace', fontSize: 8, fill: '#6B7D95' }}>Source systems</text>
+        {/* ─── Legend (compact) ─── */}
+        <g transform="translate(220, 556)">
+          <rect width={360} height={28} rx={5} fill="#0A1220" stroke="#1E2E48" strokeWidth={0.6} />
+          <line x1={12} y1={14} x2={30} y2={14} stroke="#4A5568" strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />
+          <text x={36} y={18} style={{ fontFamily: 'DM Mono, monospace', fontSize: 7, fill: '#4A5568' }}>Source</text>
+          <line x1={72} y1={14} x2={90} y2={14} stroke="#00C6BE" strokeWidth={1.5} strokeDasharray="5 4" opacity={0.7} />
+          <text x={96} y={18} style={{ fontFamily: 'DM Mono, monospace', fontSize: 7, fill: '#4A5568' }}>Databricks</text>
+          <line x1={152} y1={14} x2={170} y2={14} stroke="#EE3D2C" strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />
+          <text x={176} y={18} style={{ fontFamily: 'DM Mono, monospace', fontSize: 7, fill: '#4A5568' }}>Anaplan</text>
+          <line x1={218} y1={14} x2={236} y2={14} stroke="#D4A843" strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />
+          <text x={242} y={18} style={{ fontFamily: 'DM Mono, monospace', fontSize: 7, fill: '#4A5568' }}>Analytics</text>
+          <line x1={286} y1={14} x2={304} y2={14} stroke="#8A9DB5" strokeWidth={0.8} strokeDasharray="3 4" opacity={0.5} />
+          <text x={310} y={18} style={{ fontFamily: 'DM Mono, monospace', fontSize: 7, fill: '#4A5568' }}>Governance</text>
         </g>
       </svg>
 
-      {/* Unified tooltip — shown for any hovered node */}
+      {/* Unified tooltip */}
       {tooltip && (
         <div style={{
-          position: 'absolute', bottom: 52, left: '50%', transform: 'translateX(-50%)',
+          position: 'absolute', bottom: 42, left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(10,15,28,0.97)',
           border: `1px solid ${tooltip.typeColor || '#EE3D2C'}`,
           borderRadius: 10, padding: '14px 20px', pointerEvents: 'none',
@@ -468,6 +576,109 @@ function LandscapeDiagram() {
         </div>
       )}
     </div>
+  );
+}
+
+// ── System Landscape Tabbed (L4 / L5) ────────────────────────────────────
+function LandscapeTabbed() {
+  const [landscapeTab, setLandscapeTab] = useState('l4');
+
+  const TABS = [
+    { id: 'l4', label: 'L4 Integrated', sublabel: 'Current State', color: '#00C6BE', icon: Layers },
+    { id: 'l5', label: 'L5 Autonomous', sublabel: 'Target State', color: '#D4A843', icon: Sparkles },
+  ];
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }} style={{ marginBottom: 64 }}>
+      <div style={{ textAlign: 'center', marginBottom: 24 }}>
+        <div className="section-heading" style={{ display: 'inline-block', textAlign: 'left' }}>
+          <h2 style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 22, color: 'var(--db-white)', margin: 0 }}>System Landscape Diagram</h2>
+        </div>
+        <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 14, color: 'var(--db-muted)', marginTop: 8 }}>
+          {landscapeTab === 'l4'
+            ? 'Hover any node for a plain-language description. Click a spoke to open its full model. Teal ring = Databricks Platform integration layer.'
+            : 'L5 autonomous layer adds the Databricks Intelligence Engine, Anaplan AI co-pilots, and self-driving action outputs. Hover any node for details.'
+          }
+        </p>
+      </div>
+
+      {/* Tab switcher */}
+      <div style={{
+        display: 'flex', gap: 6, marginBottom: 16, maxWidth: 480, margin: '0 auto 16px',
+        padding: 3, background: 'var(--db-navy-2)', borderRadius: 8,
+        border: '1px solid var(--db-border)',
+      }}>
+        {TABS.map((tab) => {
+          const isActive = landscapeTab === tab.id;
+          const TabIcon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setLandscapeTab(tab.id)}
+              style={{
+                flex: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '10px 14px', borderRadius: 6,
+                border: isActive ? `1px solid ${tab.color}40` : '1px solid transparent',
+                background: isActive ? `${tab.color}12` : 'transparent',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <TabIcon size={14} color={isActive ? tab.color : 'var(--db-muted)'} />
+              <div style={{ textAlign: 'left' }}>
+                <div style={{
+                  fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 12,
+                  color: isActive ? tab.color : 'var(--db-muted)',
+                  letterSpacing: '0.04em',
+                }}>
+                  {tab.label}
+                </div>
+                <div style={{
+                  fontFamily: 'DM Mono, monospace', fontSize: 9,
+                  color: 'var(--db-muted)', opacity: isActive ? 0.8 : 0.5,
+                }}>
+                  {tab.sublabel}
+                </div>
+              </div>
+              {isActive && (
+                <div style={{
+                  width: 5, height: 5, borderRadius: '50%',
+                  background: tab.color,
+                  boxShadow: `0 0 6px ${tab.color}60`,
+                }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="card" style={{ padding: '32px 16px 48px', position: 'relative' }}>
+        <AnimatePresence mode="wait">
+          {landscapeTab === 'l4' ? (
+            <motion.div
+              key="l4-landscape"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <LandscapeDiagram />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="l5-landscape"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <L5LandscapeDiagram />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
   );
 }
 
@@ -719,20 +930,8 @@ export default function Home() {
         </div>
       </motion.div>
 
-      {/* ── System Landscape ── */}
-      <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }} style={{ marginBottom: 64 }}>
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div className="section-heading" style={{ display: 'inline-block', textAlign: 'left' }}>
-            <h2 style={{ fontFamily: 'Syne, sans-serif', fontWeight: 700, fontSize: 22, color: 'var(--db-white)', margin: 0 }}>System Landscape Diagram</h2>
-          </div>
-          <p style={{ fontFamily: 'DM Sans, sans-serif', fontSize: 14, color: 'var(--db-muted)', marginTop: 8 }}>
-            Hover any node for a plain-language description. Click a spoke to open its full model. Teal ring = Databricks Platform integration layer.
-          </p>
-        </div>
-        <div className="card" style={{ padding: '32px 16px 48px', position: 'relative' }}>
-          <LandscapeDiagram />
-        </div>
-      </motion.div>
+      {/* ── System Landscape (Tabbed: L4 / L5) ── */}
+      <LandscapeTabbed />
 
       {/* ── Integration Architecture ── */}
       <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }} style={{ marginBottom: 64 }}>

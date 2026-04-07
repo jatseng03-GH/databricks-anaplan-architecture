@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 
 const NAV_LINKS = [
   { label: 'Overview', path: '/' },
-  { label: 'Integration', path: '/integration', teal: true },
+  { label: 'Architecture', path: '/integration', teal: true },
   { label: 'Hub Model', path: '/hub' },
   { label: 'Topline', path: '/topline' },
   { label: 'Headcount', path: '/headcount' },
